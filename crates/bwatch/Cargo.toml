@@ -1,0 +1,28 @@
+[package]
+name = "bwatch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Prompt lookup tool. Agent names a finding category from a fixed list; bwatch returns the prompt for that finding category. The prompt tells the agent how to check the external tracker for that finding."
+repository.workspace = true
+readme = "../../README.md"
+
+[lib]
+name = "bwatch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bwatch"
+path = "src/main.rs"
+
+[dependencies]
+bsuite-core = { git = "https://github.com/bvasilenko/bsuite-core", branch = "main" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
