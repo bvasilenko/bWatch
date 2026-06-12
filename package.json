@@ -1,0 +1,27 @@
+{
+  "name": "@booga/bwatch",
+  "version": "0.1.1",
+  "description": "Prompt lookup tool. Agent names a finding category from a fixed list; bwatch returns the prompt for that finding category. The prompt tells the agent how to check the external tracker for that finding.",
+  "bin": {
+    "bwatch": "./bin/bwatch.js"
+  },
+  "files": [
+    "bin",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node ./bin/install.js"
+  },
+  "keywords": [
+    "cli",
+    "agent",
+    "prompt",
+    "lookup"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bvasilenko/bWatch.git"
+  }
+}
