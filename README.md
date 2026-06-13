@@ -1,5 +1,8 @@
 # bwatch
 
+For agents that act blind to outward state. bwatch consults an outward tracker (GitHub issues, Linear, Jira, Slack, Notion) for related work and emits a finding directive: ACTIONABLE (a related thread is open and the agent should reference it), INFORMATIONAL, WRONG-TIME, or MISFIRE. The finding taxonomy is closed (9 variants at v0.1); the prompt library evolves continuously via empirical-lift evaluation, so the same `bwatch verify` invocation gets stricter at surfacing relevant outward state as the corpus matures.
+
+
 Prompt lookup tool. Agent names a finding category from a fixed list; bwatch returns the prompt for that finding category. The prompt tells the agent how to check the external tracker for that finding.
 
 Built for agentic loops. Polls an external tracker source, matches the observation against a closed 9-category finding taxonomy, writes a directive on stdout, exits with a discriminating code so the calling agent can branch on the triage result.
