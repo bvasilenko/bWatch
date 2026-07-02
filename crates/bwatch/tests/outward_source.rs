@@ -2,6 +2,7 @@ mod common;
 
 use bwatch::OutwardSourceSubstrate;
 use common::{assert_public_name_contract, assert_rejects};
+use proptest::prelude::*;
 use std::str::FromStr;
 
 #[test]
@@ -136,4 +137,110 @@ fn substrate_rejects_unrecognised_names_and_urls() {
         "http://",
         "https:///path-without-host",
     ]);
+}
+
+proptest! {
+    #[test]
+    fn substrate_round_trip(index in 0usize..OutwardSourceSubstrate::ALL.len()) {
+        let substrate = OutwardSourceSubstrate::ALL[index];
+        let parsed = OutwardSourceSubstrate::from_str(&substrate.to_string())
+            .expect("stable name must round-trip through FromStr");
+        prop_assert_eq!(substrate, parsed);
+    }
+}
+
+#[test]
+fn substrate_url_routes_resolve_through_query_string_and_fragment() {
+    let cases = [
+        (
+            "https://github.com/org/repo?tab=issues",
+            OutwardSourceSubstrate::Github,
+        ),
+        (
+            "https://github.com/org/repo#comment-42",
+            OutwardSourceSubstrate::Github,
+        ),
+        (
+            "https://gitlab.example.com/group/project?branch=main&mr=7",
+            OutwardSourceSubstrate::GitlabCe,
+        ),
+        (
+            "https://linear.app/team/issues/PROJ-1?status=done",
+            OutwardSourceSubstrate::Linear,
+        ),
+        (
+            "https://myworkspace.slack.com/archives/C12345?thread_ts=1234567890",
+            OutwardSourceSubstrate::Slack,
+        ),
+    ];
+
+    for (url, expected) in cases {
+        let parsed = OutwardSourceSubstrate::from_str(url)
+            .unwrap_or_else(|_| panic!("URL with query/fragment {url:?} must resolve by host"));
+        assert_eq!(expected, parsed, "URL {url:?}");
+    }
+}
+
+#[test]
+fn substrate_rejects_dotless_inputs_that_are_not_kebab_names() {
+    assert_rejects::<OutwardSourceSubstrate>(&[
+        "github com",
+        "not a url",
+        "https://",
+        "http://",
+        " github",
+        "github ",
+    ]);
+}
+
+#[test]
+fn substrate_plain_hostname_with_port_resolves_by_stripping_port() {
+    let cases = [
+        ("github.com:443", OutwardSourceSubstrate::Github),
+        (
+            "gitlab.mycompany.com:8080",
+            OutwardSourceSubstrate::GitlabCe,
+        ),
+        ("linear.app:443", OutwardSourceSubstrate::Linear),
+        ("mycompany.atlassian.net:8443", OutwardSourceSubstrate::Jira),
+        ("myworkspace.slack.com:443", OutwardSourceSubstrate::Slack),
+    ];
+
+    for (host_with_port, expected) in cases {
+        let parsed = OutwardSourceSubstrate::from_str(host_with_port)
+            .unwrap_or_else(|_| panic!("plain hostname with port {host_with_port:?} must resolve"));
+        assert_eq!(
+            expected, parsed,
+            "port must be stripped before host-substring matching for {host_with_port:?}"
+        );
+    }
+}
+
+#[test]
+fn substrate_host_substring_priority_follows_declaration_order() {
+    let cases = [
+        (
+            "gitlab.github.example.com",
+            OutwardSourceSubstrate::GitlabCe,
+        ),
+        (
+            "github.gitlab.example.com",
+            OutwardSourceSubstrate::GitlabCe,
+        ),
+        ("slack.notion.example.com", OutwardSourceSubstrate::Slack),
+        ("notion.slack.example.com", OutwardSourceSubstrate::Slack),
+        (
+            "linear.atlassian.example.com",
+            OutwardSourceSubstrate::Linear,
+        ),
+    ];
+
+    for (host, expected) in cases {
+        let parsed = OutwardSourceSubstrate::from_str(host)
+            .unwrap_or_else(|_| panic!("host {host:?} must resolve"));
+        assert_eq!(
+            expected, parsed,
+            "host {host:?}: earlier variant in declaration order must win when multiple substrings match"
+        );
+    }
 }

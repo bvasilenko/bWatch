@@ -1,69 +1,24 @@
-use assert_cmd::Command;
-use bwatch::FindingCategory;
-use predicates::prelude::*;
+mod common;
 
-const PLACEHOLDER_DIRECTIVE_HEADER: &str = "[bwatch placeholder directive - pre-corpus output]";
-const ACTION_PREFIX: &str = "ACTION: This invocation reached bwatch";
-const EXIT_CODE_FOOTER: &str = "Exit code carries the verdict-class signal.";
-const PUBLIC_INVOCATION_SURFACE_LINE: &str = "Invocation surface: cli.";
-const POLL_FINDING_EXIT_CODE: i32 = 1;
-const INTERNAL_ERROR_EXIT_CODE: i32 = 2;
+use bsuite_core::ExitCode;
+use bwatch::FindingCategory;
+use common::{bwatch_command, command_stdout_with_dir, poll_stdout_with_dir};
+use predicates::prelude::*;
+use tempfile::TempDir;
+
 const INTERNAL_SURFACE_TOKENS: [&str; 6] = ["L2a", "L2b", "L2c", "l2a", "l2b", "l2c"];
 
 #[derive(Debug, Clone, Copy)]
 struct PollCase<'a> {
     args: &'a [&'a str],
-    expected_source: &'a str,
-    expected_mission: &'a str,
+    category: FindingCategory,
 }
 
 impl PollCase<'_> {
-    fn assert(self) {
-        let stdout = poll_stdout(self.args);
-
-        assert_poll_directive(&stdout);
-        assert!(
-            stdout.contains(&format!("source={}", self.expected_source)),
-            "stdout missing source={}: {stdout}",
-            self.expected_source
-        );
-        assert!(
-            stdout.contains(&format!("mission={}", self.expected_mission)),
-            "stdout missing mission={}: {stdout}",
-            self.expected_mission
-        );
+    fn assert(self, dir: &TempDir) {
+        let stdout = command_stdout_with_dir(self.args, ExitCode::Finding, dir);
+        assert_poll_directive(&stdout, self.category);
     }
-}
-
-fn bwatch_command() -> Command {
-    Command::cargo_bin("bwatch").expect("binary exists")
-}
-
-fn command_stdout_with_code(args: &[&str], code: i32) -> String {
-    let output = bwatch_command()
-        .args(args)
-        .assert()
-        .code(code)
-        .get_output()
-        .clone();
-
-    String::from_utf8(output.stdout).expect("stdout is utf8")
-}
-
-fn poll_stdout(args: &[&str]) -> String {
-    command_stdout_with_code(args, POLL_FINDING_EXIT_CODE)
-}
-
-fn successful_stdout(args: &[&str]) -> String {
-    command_stdout_with_code(args, 0)
-}
-
-fn assert_usage_failure(args: &[&str], stderr_fragment: &str) {
-    bwatch_command()
-        .args(args)
-        .assert()
-        .code(64)
-        .stderr(predicate::str::contains(stderr_fragment));
 }
 
 fn assert_no_internal_surface_tokens(stdout: &str) {
@@ -75,56 +30,21 @@ fn assert_no_internal_surface_tokens(stdout: &str) {
     }
 }
 
-fn assert_poll_directive(stdout: &str) {
+fn assert_poll_directive(stdout: &str, category: FindingCategory) {
+    let expected_prefix = format!("FINDING-DETECTED: {}.", category.stable_name());
     assert!(
-        stdout.contains(PLACEHOLDER_DIRECTIVE_HEADER),
-        "missing header: {stdout}"
-    );
-    assert!(
-        stdout.contains("Parsed input: source="),
-        "missing parsed input: {stdout}"
-    );
-    assert!(
-        stdout.contains("mission="),
-        "missing mission in parsed input: {stdout}"
-    );
-    assert!(
-        stdout.contains("Routing key: FindingCategory::"),
-        "missing routing key: {stdout}"
-    );
-    assert!(
-        stdout.contains(" placeholder route."),
-        "missing placeholder route: {stdout}"
-    );
-    assert!(
-        stdout.contains(PUBLIC_INVOCATION_SURFACE_LINE),
-        "missing invocation surface: {stdout}"
-    );
-    assert!(
-        stdout.contains("Outward-source-state: Actionable."),
-        "missing outward state: {stdout}"
-    );
-    assert!(
-        stdout.contains(ACTION_PREFIX),
-        "missing ACTION prefix: {stdout}"
-    );
-    assert!(
-        stdout.contains("finding category"),
-        "missing finding category in ACTION: {stdout}"
-    );
-    assert!(
-        stdout.contains("external tracker source"),
-        "missing tracker reference: {stdout}"
-    );
-    assert!(
-        stdout.contains(EXIT_CODE_FOOTER),
-        "missing exit code footer: {stdout}"
+        stdout.contains(&expected_prefix),
+        "missing finding header for {category}: {stdout}"
     );
     assert_no_internal_surface_tokens(stdout);
 }
 
-fn deferred_command_output(command_name: &str) -> String {
-    format!("bwatch {command_name} placeholder: behavior is deferred.\n")
+fn assert_usage_failure(args: &[&str], stderr_fragment: &str) {
+    bwatch_command()
+        .args(args)
+        .assert()
+        .code(ExitCode::Usage.as_i32())
+        .stderr(predicate::str::contains(stderr_fragment));
 }
 
 #[test]
@@ -138,7 +58,8 @@ fn help_exits_successfully() {
 
 #[test]
 fn finding_categories_exits_successfully_and_prints_exact_closed_set() {
-    let stdout = successful_stdout(&["finding-categories"]);
+    let dir = TempDir::new().unwrap();
+    let stdout = command_stdout_with_dir(&["finding-categories"], ExitCode::Success, &dir);
     let actual = stdout.lines().collect::<Vec<_>>();
     let expected = FindingCategory::ALL
         .iter()
@@ -149,123 +70,137 @@ fn finding_categories_exits_successfully_and_prints_exact_closed_set() {
 }
 
 #[test]
-fn placeholder_commands_exit_successfully_with_stable_output() {
-    for command_name in ["update", "init", "tail", "explain", "process"] {
-        let stdout = successful_stdout(&[command_name]);
-
-        assert_eq!(deferred_command_output(command_name), stdout);
-    }
-}
-
-#[test]
-fn poll_emits_placeholder_directive_and_finding_exit_code() {
+fn poll_emits_corpus_directive_and_finding_exit_code() {
+    let dir = TempDir::new().unwrap();
     PollCase {
-        args: &["poll"],
-        expected_source: "<none>",
-        expected_mission: "<none>",
+        args: &["poll", "--category", "sprint-conflict"],
+        category: FindingCategory::SprintConflict,
     }
-    .assert();
+    .assert(&dir);
 }
 
 #[test]
-fn poll_directive_reports_every_supported_input_combination() {
-    for poll_case in [
+fn poll_directive_covers_every_finding_category() {
+    let dir = TempDir::new().unwrap();
+    for category in FindingCategory::ALL {
         PollCase {
-            args: &["poll", "--source", "github", "--mission", "v0.1"],
-            expected_source: "github",
-            expected_mission: "v0.1",
-        },
-        PollCase {
-            args: &["poll", "--source", "github"],
-            expected_source: "github",
-            expected_mission: "<none>",
-        },
-        PollCase {
-            args: &["poll", "--mission", "v0.1"],
-            expected_source: "<none>",
-            expected_mission: "v0.1",
-        },
-        PollCase {
-            args: &[
-                "poll",
+            args: &["poll", "--category", category.stable_name()],
+            category,
+        }
+        .assert(&dir);
+    }
+}
+
+#[test]
+fn optional_poll_flags_are_orthogonal_to_directive_category() {
+    let dir = TempDir::new().unwrap();
+    let cases: &[(&str, &[&str])] = &[
+        ("sprint-conflict", &["--source", "github"]),
+        ("sprint-conflict", &["--mission", "v0.1"]),
+        ("sprint-conflict", &["--manifest", "manifest.json"]),
+        ("sprint-conflict", &["--quiet"]),
+        ("sprint-conflict", &["--reason", "review requested"]),
+        (
+            "runbook-update",
+            &["--source", "github", "--mission", "sprint-3"],
+        ),
+        (
+            "external-spec-change",
+            &[
                 "--source",
                 "https://github.com/org/repo",
                 "--mission",
-                "sprint-3",
+                "v0.1",
+                "--reason",
+                "API changed",
             ],
-            expected_source: "https://github.com/org/repo",
-            expected_mission: "sprint-3",
-        },
-        PollCase {
-            args: &["poll", "--manifest", "manifest.json"],
-            expected_source: "<none>",
-            expected_mission: "<none>",
-        },
-    ] {
-        poll_case.assert();
+        ),
+    ];
+    for (category_name, extra_args) in cases {
+        let category = category_name
+            .parse::<FindingCategory>()
+            .expect("valid category name");
+        let stdout = poll_stdout_with_dir(category_name, extra_args, &dir);
+        assert_poll_directive(&stdout, category);
     }
 }
 
 #[test]
-fn poll_quiet_and_json_flags_keep_directive_stdout() {
-    for poll_case in [
-        PollCase {
-            args: &["poll", "--quiet", "--reason", "review requested"],
-            expected_source: "<none>",
-            expected_mission: "<none>",
-        },
-        PollCase {
-            args: &["poll", "--json", "--reason", "review requested"],
-            expected_source: "<none>",
-            expected_mission: "<none>",
-        },
-    ] {
-        poll_case.assert();
+fn poll_quiet_flag_preserves_directive_on_stdout() {
+    let dir = TempDir::new().unwrap();
+    PollCase {
+        args: &[
+            "poll",
+            "--category",
+            "sprint-conflict",
+            "--quiet",
+            "--reason",
+            "review requested",
+        ],
+        category: FindingCategory::SprintConflict,
     }
+    .assert(&dir);
 }
 
 #[test]
-fn poll_rejects_blank_reason() {
+fn poll_rejects_blank_reason_regardless_of_category() {
+    // Blank reason rejection is enforced before category resolution.
     for blank_reason in ["", " ", "   ", "\t", "\n", "\r", "\r\n"] {
-        bwatch_command()
-            .args(["poll", "--reason", blank_reason])
-            .assert()
-            .code(64)
-            .stderr(predicate::str::contains("reason must not be empty"));
+        for category in ["sprint-conflict", "runbook-update"] {
+            bwatch_command()
+                .args(["poll", "--category", category, "--reason", blank_reason])
+                .assert()
+                .code(ExitCode::Usage.as_i32())
+                .stderr(predicate::str::contains("reason must not be empty"));
+        }
     }
 }
 
 #[test]
 fn poll_accepts_every_non_blank_reason_shape() {
+    let dir = TempDir::new().unwrap();
     for reason in [
         "review requested",
         " review requested ",
         "review\trequested",
     ] {
         PollCase {
-            args: &["poll", "--reason", reason],
-            expected_source: "<none>",
-            expected_mission: "<none>",
+            args: &["poll", "--category", "sprint-conflict", "--reason", reason],
+            category: FindingCategory::SprintConflict,
         }
-        .assert();
+        .assert(&dir);
     }
+}
+
+#[test]
+fn poll_rejects_unknown_category_with_usage_exit_code() {
+    bwatch_command()
+        .args(["poll", "--category", "not-a-valid-category"])
+        .assert()
+        .code(ExitCode::Usage.as_i32())
+        .stderr(predicate::str::contains("unknown finding category"));
+}
+
+#[test]
+fn poll_missing_required_category_flag_exits_with_usage() {
+    assert_usage_failure(&["poll"], "--category");
 }
 
 #[test]
 fn poll_rejects_empty_source_with_internal_error() {
     bwatch_command()
-        .args(["poll", "--source", ""])
+        .args(["poll", "--category", "sprint-conflict", "--source", ""])
         .assert()
-        .code(INTERNAL_ERROR_EXIT_CODE)
+        .code(ExitCode::InternalError.as_i32())
         .stderr(predicate::str::contains("source input is malformed"));
 }
 
 #[test]
 fn poll_rejects_empty_mission_with_internal_error() {
     bwatch_command()
-        .args(["poll", "--mission", ""])
+        .args(["poll", "--category", "sprint-conflict", "--mission", ""])
         .assert()
-        .code(INTERNAL_ERROR_EXIT_CODE)
+        .code(ExitCode::InternalError.as_i32())
         .stderr(predicate::str::contains("mission reference is invalid"));
 }
 

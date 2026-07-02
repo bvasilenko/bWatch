@@ -71,5 +71,23 @@ fn category_rejects_names_outside_closed_set() {
         "sprint-conflict ",
         "collaborator",
         "cms-plugin",
+        "Sprint-Conflict",
+        "SPRINT-CONFLICT",
+        "sprint-CONFLICT",
+        "Runbook-Update",
+        "RUNBOOK-UPDATE",
     ]);
+}
+
+proptest! {
+    #[test]
+    fn category_from_str_rejects_every_string_not_in_the_closed_set(s in "\\PC*") {
+        let is_member = FindingCategory::ALL.iter().any(|c| c.stable_name() == s);
+        if !is_member {
+            prop_assert!(
+                FindingCategory::from_str(&s).is_err(),
+                "from_str must reject any string that is not a stable name, but accepted {s:?}"
+            );
+        }
+    }
 }

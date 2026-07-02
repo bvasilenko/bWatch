@@ -3,14 +3,6 @@ use bwatch::{
     PollArgs, routing_key,
 };
 
-struct PendingPoller;
-
-impl PendingPoller {
-    fn poll(&self) -> OutwardSourceState {
-        unimplemented!("not yet implemented")
-    }
-}
-
 #[test]
 fn library_reexports_public_contract_types() {
     assert_eq!(9, FindingCategory::ALL.len());
@@ -22,6 +14,7 @@ fn library_reexports_public_contract_types() {
 fn library_reexports_cli_surface_types() {
     let _error: BwatchError = BwatchError::Usage("test".to_owned());
     let _poll_args = PollArgs {
+        category: "sprint-conflict".to_owned(),
         source: None,
         mission: None,
         manifest: None,
@@ -53,12 +46,4 @@ fn substrate_input_module_is_accessible_through_public_path() {
 
     assert_eq!(Some("github".to_owned()), input.source);
     assert_eq!(Some("v0.1".to_owned()), input.mission);
-}
-
-#[test]
-#[should_panic(expected = "not yet implemented")]
-fn placeholder_poller_is_explicitly_pending() {
-    let poller = PendingPoller;
-
-    let _ = poller.poll();
 }
